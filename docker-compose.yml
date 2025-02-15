@@ -1,0 +1,50 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql:/etc/mysql/conf.d
+    #command:
+    #  [
+    #    "--slow_query_log=1",
+    #    "--long_query_time=1",
+    #    "--slow_query_log_file=/var/log/mysql/slow.log",
+    #  ]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    build: ./app
+    container_name: app
+    restart: unless-stopped
+    depends_on:
+      - mysql
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_HOST: mysql
+      DATABASE_NAME: testdb
+      DATABASE_USER: testuser
+      DATABASE_PASSWORD: testpassword
+    volumes:
+      - ./app:/app
+    command: ["python", "app.py"]
+
+volumes:
+  mysql_data:
+  #mongo_data:
+  #es_data:
+  #elk_data:
+  #graylog_data:
