@@ -1,8 +1,7 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: mysql_db
-    restart: unless-stopped
+    container_name: mysql-db
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: testdb
@@ -12,18 +11,10 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql:/etc/mysql/conf.d
-    command:
-      [
-        "sh",
-        "-c",
-        "touch /var/log/mysql-slow.log && chown mysql:mysql /var/log/mysql-slow.log && mysqld",
-      ]
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - mysql_logs:/var/log/
+      - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - graylog
 
   app:
     build: ./app
@@ -34,17 +25,124 @@ services:
     ports:
       - "5000:5000"
     environment:
-      DATABASE_HOST: mysql
+      DATABASE_HOST: mysql-db
       DATABASE_NAME: testdb
       DATABASE_USER: testuser
       DATABASE_PASSWORD: testpassword
     volumes:
       - ./app:/app
     command: ["python", "app.py"]
+    networks:
+      - graylog
+
+  graylog:
+    image: graylog/graylog:6.1.6
+    container_name: graylog
+    restart: unless-stopped
+    #environment:
+    #GRAYLOG_PASSWORD_SECRET: somepasswordpepper
+    #GRAYLOG_ROOT_PASSWORD_SHA2: 5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8 # password
+    #GRAYLOG_HTTP_EXTERNAL_URI: "http://127.0.0.1:9000/"
+    #GRAYLOG_IS_LEADER: "true"
+    # GRAYLOG_DATANODE_PASSWORD_SECRET and GRAYLOG_PASSWORD_SECRET MUST be the same value
+    #GRAYLOG_MONGODB_URI: "mongodb://mongo-graylog:27017/graylog"
+    #GRAYLOG_ELASTICSEARCH_HOSTS: "http://elasticsearch-graylog:9200"
+    depends_on:
+      - mongo_graylog
+      - elasticsearch_graylog
+    ports:
+      # Graylog web interface and REST API
+      - 9000:9000
+      # Syslog TCP
+      - 1514:1514
+      # Syslog UDP
+      - 1514:1514/udp
+      # GELF TCP
+      - 12201:12201
+      # GELF UDP
+      - 12201:12201/udp
+      # Beats
+      - 5044:5044
+      - 5044:5044/udp
+      - 5045:5045
+      - 5045:5045/udp
+    volumes:
+      - data_graylog:/usr/share/graylog/data
+      - ./graylog/graylog.conf:/usr/share/graylog/data/config/graylog.conf
+    networks:
+      - graylog
+
+  filebeat_graylog:
+    image: docker.elastic.co/beats/filebeat:7.10.2
+    user: root
+    container_name: filebeat-graylog
+    restart: unless-stopped
+    configs:
+      - source: filebeat_config
+        target: /usr/share/filebeat/filebeat.yml
+    volumes:
+      #- ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml
+      #- /var/run/docker.sock:/var/run/docker.sock
+      #- /var/lib/docker/containers/:/var/lib/docker/containers/:ro
+      - filebeat_data:/usr/share/filebeat/data
+      - mysql_logs:/var/log/mysql
+    depends_on:
+      - graylog
+    command:
+      [
+        "filebeat",
+        "-e",
+        "--strict.perms=false",
+        "-c",
+        "/usr/share/filebeat/filebeat.yml",
+      ]
+    #command: ["filebeat", "-e", "-c", "/usr/share/filebeat/filebeat.yml"]
+    networks:
+      - graylog
+
+  mongo_graylog:
+    image: mongo:6.0.5
+    container_name: mongo-graylog
+    restart: unless-stopped
+    volumes:
+      - mongo_data_graylog:/data/db
+    networks:
+      - graylog
+
+  elasticsearch_graylog:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.27
+    container_name: elasticsearch-graylog
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - es_data_graylog2:/usr/share/opensearch/data
+    ports:
+      - 9200:9200 # REST API
+      - 9600:9600
+    networks:
+      - graylog
+
+configs:
+  filebeat_config:
+    file: $PWD/filebeat/filebeat.yml
+
+networks:
+  graylog:
+    driver: bridge
 
 volumes:
+  mysql_logs:
   mysql_data:
-  #mongo_data:
-  #es_data:
-  #elk_data:
-  #graylog_data:
+  mongo_data_graylog:
+  es_data_graylog2:
+  data_graylog:
+  filebeat_data:
