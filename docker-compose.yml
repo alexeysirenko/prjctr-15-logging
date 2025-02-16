@@ -14,7 +14,7 @@ services:
       - mysql_logs:/var/log/
       - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf
     networks:
-      - graylog
+      - app
 
   app:
     build: ./app
@@ -33,35 +33,21 @@ services:
       - ./app:/app
     command: ["python", "app.py"]
     networks:
-      - graylog
+      - app
 
   graylog:
     image: graylog/graylog:6.1.6
     container_name: graylog
     restart: unless-stopped
-    #environment:
-    #GRAYLOG_PASSWORD_SECRET: somepasswordpepper
-    #GRAYLOG_ROOT_PASSWORD_SHA2: 5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8 # password
-    #GRAYLOG_HTTP_EXTERNAL_URI: "http://127.0.0.1:9000/"
-    #GRAYLOG_IS_LEADER: "true"
-    # GRAYLOG_DATANODE_PASSWORD_SECRET and GRAYLOG_PASSWORD_SECRET MUST be the same value
-    #GRAYLOG_MONGODB_URI: "mongodb://mongo-graylog:27017/graylog"
-    #GRAYLOG_ELASTICSEARCH_HOSTS: "http://elasticsearch-graylog:9200"
     depends_on:
       - mongo_graylog
       - elasticsearch_graylog
     ports:
-      # Graylog web interface and REST API
       - 9000:9000
-      # Syslog TCP
       - 1514:1514
-      # Syslog UDP
       - 1514:1514/udp
-      # GELF TCP
       - 12201:12201
-      # GELF UDP
       - 12201:12201/udp
-      # Beats
       - 5044:5044
       - 5044:5044/udp
       - 5045:5045
@@ -78,13 +64,9 @@ services:
     container_name: filebeat-graylog
     restart: unless-stopped
     configs:
-      - source: filebeat_config
+      - source: filebeat_graylog_config
         target: /usr/share/filebeat/filebeat.yml
     volumes:
-      #- ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml
-      #- /var/run/docker.sock:/var/run/docker.sock
-      #- /var/lib/docker/containers/:/var/lib/docker/containers/:ro
-      - filebeat_data:/usr/share/filebeat/data
       - mysql_logs:/var/log/mysql
     depends_on:
       - graylog
@@ -96,7 +78,6 @@ services:
         "-c",
         "/usr/share/filebeat/filebeat.yml",
       ]
-    #command: ["filebeat", "-e", "-c", "/usr/share/filebeat/filebeat.yml"]
     networks:
       - graylog
 
@@ -131,12 +112,93 @@ services:
     networks:
       - graylog
 
+  logstash_elk:
+    image: docker.elastic.co/logstash/logstash:7.10.2
+    container_name: logstash-elk
+    command: ["logstash", "-f", "/usr/share/logstash/pipeline/logstash.conf"]
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-elk:9200
+    restart: unless-stopped
+    volumes:
+      - ./logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    depends_on:
+      - elasticsearch_elk
+    ports:
+      - "5046:5044" # Beats input for Filebeat
+      - "9601:9600" # Monitoring
+    networks:
+      - elk
+
+  elasticsearch_elk:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.27
+    container_name: elasticsearch-elk
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - es_data_elk:/usr/share/opensearch/data
+    ports:
+      - 9202:9200 # REST API
+      - 9602:9600
+    networks:
+      - elk
+
+  kibana_elk:
+    image: docker.elastic.co/kibana/kibana:7.10.2
+    container_name: kibana-elk
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-elk:9200
+    depends_on:
+      - elasticsearch_elk
+    ports:
+      - "5601:5601"
+    networks:
+      - elk
+
+  filebeat_elk:
+    image: docker.elastic.co/beats/filebeat:7.10.2
+    user: root
+    container_name: filebeat-elk
+    restart: unless-stopped
+    configs:
+      - source: filebeat_elk_config
+        target: /usr/share/filebeat/filebeat.yml
+    volumes:
+      - mysql_logs:/var/log/mysql
+    depends_on:
+      - logstash_elk
+    command:
+      [
+        "filebeat",
+        "-e",
+        "--strict.perms=false",
+        "-c",
+        "/usr/share/filebeat/filebeat.yml",
+      ]
+    networks:
+      - elk
+
 configs:
-  filebeat_config:
-    file: $PWD/filebeat/filebeat.yml
+  filebeat_graylog_config:
+    file: $PWD/filebeat/filebeat-graylog.yml
+  filebeat_elk_config:
+    file: $PWD/filebeat/filebeat-elk.yml
 
 networks:
   graylog:
+    driver: bridge
+  elk:
+    driver: bridge
+  app:
     driver: bridge
 
 volumes:
@@ -144,5 +206,5 @@ volumes:
   mysql_data:
   mongo_data_graylog:
   es_data_graylog2:
+  es_data_elk:
   data_graylog:
-  filebeat_data:

@@ -11,6 +11,15 @@ db_config = {
     "database": os.getenv("DATABASE_NAME", "testdb")
 }
 
+@app.route('/slow', methods=['GET'])
+def slow():
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT SLEEP(3);"
+    cursor.execute(query)
+    conn.close()
+    return jsonify({})
+
 @app.route('/users', methods=['GET'])
 def get_users():
     offset = request.args.get('offset', default=0, type=int)
