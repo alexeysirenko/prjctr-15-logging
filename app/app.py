@@ -13,22 +13,22 @@ db_config = {
 
 @app.route('/slow', methods=['GET'])
 def slow():
+    timeout = request.args.get('timeout', default=2, type=int)
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor(dictionary=True)
-    query = "SELECT SLEEP(3);"
-    cursor.execute(query)
+    query = "SELECT SLEEP(%s);"
+    cursor.execute(query, (timeout))
     conn.close()
     return jsonify({})
 
-@app.route('/users', methods=['GET'])
-def get_users():
-    offset = request.args.get('offset', default=0, type=int)
-    limit = request.args.get('limit', default=10, type=int)
+@app.route('/search', methods=['GET'])
+def search_users():
+    name = request.args.get('name', default="", type=str)
 
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor(dictionary=True)
-    query = "SELECT * FROM users LIMIT %s OFFSET %s"
-    cursor.execute(query, (limit, offset))
+    query = "SELECT * FROM users WHERE name LIKE %s"
+    cursor.execute(query, (name,))
     users = cursor.fetchall()
     conn.close()
     return jsonify(users)

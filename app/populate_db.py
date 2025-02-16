@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
-users = [("User{}".format(i), "user{}@example.com".format(i)) for i in range(100000)]
+users = [("User{}".format(i), "user{}@example.com".format(i)) for i in range(1000000)]
 cursor.executemany("INSERT INTO users (name, email) VALUES (%s, %s)", users)
 
 conn.commit()
